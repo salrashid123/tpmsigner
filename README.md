@@ -42,7 +42,7 @@ import (
 	digest := h.Sum(nil)
 
 	// assume the handle to the rsassa key is persistentHandle 0x81008001
-	r, err := saltpm.NewTPMCrypto(&saltpm.TPM{
+	r, err := tpmsigner.NewTPMCrypto(&tpmsigner.TPM{
 		TpmDevice: rwc,
 		Handle:    tpm2.TPMHandle(handle),
 	})
@@ -251,9 +251,9 @@ If the key is setup with an AuthPolicy (eg, a policy that requires a passphrase 
 If the key requires a password, initialize a `NewPasswordAuthSession`
 
 ```golang
-	se, err := saltpm.NewPasswordAuthSession(rwr, []byte(*keyPass), 0)
+	se, err := tpmsigner.NewPasswordAuthSession(rwr, []byte(*keyPass), 0)
 
-	rr, err := saltpm.NewTPMCrypto(&saltpm.TPM{
+	rr, err := tpmsigner.NewTPMCrypto(&tpmsigner.TPM{
 		TpmDevice:   rwc,
 		Handle:      tpm2.TPMHandle(*handle),
 		AuthSession: se,
@@ -265,14 +265,14 @@ If the key requires a password, initialize a `NewPasswordAuthSession`
 If the key requires a password, initialize a `NewPCRSession`
 
 ```golang
-	se, err := saltpm.NewPCRSession(rwr, []tpm2.TPMSPCRSelection{
+	se, err := tpmsigner.NewPCRSession(rwr, []tpm2.TPMSPCRSelection{
 		{
 			Hash:      tpm2.TPMAlgSHA256,
 			PCRSelect: tpm2.PCClientCompatible.PCRs(uint(23)),
 		},
 	}, tpm2.TPM2BDigest{}, 0)
 
-	rr, err := saltpm.NewTPMCrypto(&saltpm.TPM{
+	rr, err := tpmsigner.NewTPMCrypto(&tpmsigner.TPM{
 		TpmDevice:   rwc,
 		Handle:      tpm2.TPMHandle(*handle),
 		AuthSession: se,
@@ -345,7 +345,7 @@ which you can call as:
 		},
 	}, []byte("testpswd"))
 
-	rr, err := saltpm.NewTPMCrypto(&saltpm.TPM{
+	rr, err := tpmsigner.NewTPMCrypto(&tpmsigner.TPM{
 		TpmDevice: rwc,
 		Handle:    tpm2.TPMHandle(*handle*),
 		AuthSession: se,
