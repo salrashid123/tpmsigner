@@ -29,7 +29,7 @@ then
 
 ```golang
 import (
-	saltpm "github.com/salrashid123/tpmsigner"
+	"github.com/salrashid123/tpmsigner"
 	"github.com/google/go-tpm/tpmutil"
 )
 
