@@ -12,6 +12,8 @@ see the [example/](example/) folder for more information.
 
 >> this library is not supported by google
 
+please note i copied the original repo at [https://github.com/salrashid123/signer](https://github.com/salrashid123/signer) over here.
+
 ---
 
 ### Usage Signer
