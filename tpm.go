@@ -11,11 +11,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
-	"encoding/pem"
 	"fmt"
 	"io"
 	"math/big"
-	"os"
 	"sync"
 
 	"github.com/google/go-tpm/tpm2"
@@ -32,11 +30,6 @@ type TPM struct {
 
 	ECCRawOutput bool // for ECC keys, output raw signatures. If false, signature is ans1 formatted
 	refreshMutex sync.Mutex
-
-	// PublicCertFile path to the x509 certificate for the signer.  Used for TLS
-	//
-	// Deprecated: use X509Certificate instead
-	PublicCertFile string // a provided public x509 certificate for the signer
 
 	// X509Certificate raw x509 certificate for the signer. Used for TLS
 	X509Certificate *x509.Certificate // public x509 certificate for the signer
@@ -55,9 +48,6 @@ type TPM struct {
 
 func NewTPMCrypto(conf *TPM) (TPM, error) {
 
-	if conf.X509Certificate != nil && conf.PublicCertFile != "" {
-		return TPM{}, fmt.Errorf("salrashid123/signer: Either X509Certificate or a the path to the certificate must be specified; not both")
-	}
 	if conf.TpmDevice == nil {
 		return TPM{}, fmt.Errorf("salrashid123/signer: TpmDevice must be specified")
 	}
@@ -274,19 +264,7 @@ func (t TPM) Sign(rr io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, 
 func (t TPM) TLSCertificate() (tls.Certificate, error) {
 
 	if t.X509Certificate == nil {
-		pubPEM, err := os.ReadFile(t.PublicCertFile)
-		if err != nil {
-			return tls.Certificate{}, fmt.Errorf("unable to read public certificate file %v", err)
-		}
-		block, _ := pem.Decode([]byte(pubPEM))
-		if block == nil {
-			return tls.Certificate{}, fmt.Errorf("failed to parse PEM block containing the public key")
-		}
-		pub, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return tls.Certificate{}, fmt.Errorf("unable to read public certificate file %v", err)
-		}
-		t.X509Certificate = pub
+		return tls.Certificate{}, fmt.Errorf("X509Certificate cannot be nil if used for TLS")
 	}
 
 	var privKey crypto.PrivateKey = t
