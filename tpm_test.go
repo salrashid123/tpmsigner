@@ -119,6 +119,31 @@ var (
 		),
 	}
 
+	rsaNoSchemeTemplate = tpm2.TPMTPublic{
+		Type:    tpm2.TPMAlgRSA,
+		NameAlg: tpm2.TPMAlgSHA256,
+		ObjectAttributes: tpm2.TPMAObject{
+			SignEncrypt:         true,
+			FixedTPM:            true,
+			FixedParent:         true,
+			SensitiveDataOrigin: true,
+			UserWithAuth:        true,
+		},
+		AuthPolicy: tpm2.TPM2BDigest{},
+		Parameters: tpm2.NewTPMUPublicParms(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPMSRSAParms{
+				KeyBits: 2048,
+			},
+		),
+		Unique: tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPM2BPublicKeyRSA{
+				Buffer: make([]byte, 256),
+			},
+		),
+	}
+
 	eccTemplate = tpm2.TPMTPublic{
 		Type:    tpm2.TPMAlgECC,
 		NameAlg: tpm2.TPMAlgSHA256,
@@ -434,6 +459,168 @@ func TestTPMSignRSAFail(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestTPMSignRSAFailScehmeMismatch(t *testing.T) {
+	tpmDevice, err := simulator.Get()
+	require.NoError(t, err)
+	defer tpmDevice.Close()
+
+	rwr := transport.FromReadWriter(tpmDevice)
+	primaryKey, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHOwner,
+		InPublic:      tpm2.New2B(tpm2.RSASRKTemplate),
+	}.Execute(rwr)
+	require.NoError(t, err)
+
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: primaryKey.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwr)
+	}()
+
+	rsaKeyResponse, err := tpm2.CreateLoaded{
+		ParentHandle: tpm2.AuthHandle{
+			Handle: primaryKey.ObjectHandle,
+			Name:   primaryKey.Name,
+			Auth:   tpm2.PasswordAuth(nil),
+		},
+		InPublic: tpm2.New2BTemplate(&rsaTemplate), //use the template with rsassa scheme
+	}.Execute(rwr)
+	require.NoError(t, err)
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: rsaKeyResponse.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwr)
+	}()
+
+	conf := TPM{
+		TpmDevice: tpmDevice,
+		Handle:    rsaKeyResponse.ObjectHandle,
+	}
+
+	tpm, err := NewTPMCrypto(&conf)
+	require.NoError(t, err)
+
+	hash := crypto.SHA256.New()
+	hash.Write([]byte("test digest"))
+	digest := hash.Sum(nil)
+
+	opts := &rsa.PSSOptions{
+		Hash:       crypto.SHA256,
+		SaltLength: rsa.PSSSaltLengthAuto,
+	}
+	_, err = tpm.Sign(tpmDevice, digest, opts) // try to sign forcing pss
+	require.Error(t, err)
+
+}
+
+func TestTPMSignRSASchemeDefaultPSS(t *testing.T) {
+	tpmDevice, err := simulator.Get()
+	require.NoError(t, err)
+	defer tpmDevice.Close()
+
+	rwr := transport.FromReadWriter(tpmDevice)
+	primaryKey, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHOwner,
+		InPublic:      tpm2.New2B(tpm2.RSASRKTemplate),
+	}.Execute(rwr)
+	require.NoError(t, err)
+
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: primaryKey.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwr)
+	}()
+
+	rsaKeyResponse, err := tpm2.CreateLoaded{
+		ParentHandle: tpm2.AuthHandle{
+			Handle: primaryKey.ObjectHandle,
+			Name:   primaryKey.Name,
+			Auth:   tpm2.PasswordAuth(nil),
+		},
+		InPublic: tpm2.New2BTemplate(&rsaNoSchemeTemplate), // template has no schme defined
+	}.Execute(rwr)
+	require.NoError(t, err)
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: rsaKeyResponse.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwr)
+	}()
+
+	conf := TPM{
+		TpmDevice: tpmDevice,
+		Handle:    rsaKeyResponse.ObjectHandle,
+	}
+
+	tpm, err := NewTPMCrypto(&conf)
+	require.NoError(t, err)
+
+	hash := crypto.SHA256.New()
+	hash.Write([]byte("test digest"))
+	digest := hash.Sum(nil)
+
+	opts := &rsa.PSSOptions{
+		Hash:       crypto.SHA256,
+		SaltLength: rsa.PSSSaltLengthAuto,
+	}
+	_, err = tpm.Sign(tpmDevice, digest, opts) // so we can sign with pss
+	require.NoError(t, err)
+}
+
+func TestTPMSignRSASchemeDefaultRSASSA(t *testing.T) {
+	tpmDevice, err := simulator.Get()
+	require.NoError(t, err)
+	defer tpmDevice.Close()
+
+	rwr := transport.FromReadWriter(tpmDevice)
+	primaryKey, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHOwner,
+		InPublic:      tpm2.New2B(tpm2.RSASRKTemplate),
+	}.Execute(rwr)
+	require.NoError(t, err)
+
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: primaryKey.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwr)
+	}()
+
+	rsaKeyResponse, err := tpm2.CreateLoaded{
+		ParentHandle: tpm2.AuthHandle{
+			Handle: primaryKey.ObjectHandle,
+			Name:   primaryKey.Name,
+			Auth:   tpm2.PasswordAuth(nil),
+		},
+		InPublic: tpm2.New2BTemplate(&rsaNoSchemeTemplate), // this template has no scheme defined
+	}.Execute(rwr)
+	require.NoError(t, err)
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: rsaKeyResponse.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwr)
+	}()
+
+	conf := TPM{
+		TpmDevice: tpmDevice,
+		Handle:    rsaKeyResponse.ObjectHandle,
+	}
+
+	tpm, err := NewTPMCrypto(&conf)
+	require.NoError(t, err)
+
+	hash := crypto.SHA256.New()
+	hash.Write([]byte("test digest"))
+	digest := hash.Sum(nil)
+
+	_, err = tpm.Sign(tpmDevice, digest, crypto.SHA256) // so we expect it to work if we use rsassa
+	require.NoError(t, err)
+}
+
 func TestTPMSignRSAPSS(t *testing.T) {
 	tpmDevice, err := simulator.Get()
 	require.NoError(t, err)
@@ -498,13 +685,15 @@ func TestTPMSignRSAPSS(t *testing.T) {
 	hash.Write([]byte("test digest"))
 	digest := hash.Sum(nil)
 
-	signature, err := tpm.Sign(tpmDevice, digest, nil)
-	require.NoError(t, err)
-
+	// For both restricted and unrestricted signing keys, the random salt length is the largest size allowed by FIPS 186-5.
 	opts := &rsa.PSSOptions{
 		Hash:       crypto.SHA256,
 		SaltLength: rsa.PSSSaltLengthAuto,
 	}
+
+	signature, err := tpm.Sign(tpmDevice, digest, opts)
+	require.NoError(t, err)
+
 	err = rsa.VerifyPSS(pubKey, crypto.SHA256, digest, signature, opts)
 	require.NoError(t, err)
 }

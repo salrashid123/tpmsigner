@@ -74,6 +74,7 @@ cd example/
 
 ## if you want to use a software TPM, 
 # rm -rf /tmp/myvtpm && mkdir /tmp/myvtpm
+# swtpm_setup --tpmstate myvtpm --tpm2 --create-ek-cert
 # swtpm socket --tpmstate dir=/tmp/myvtpm --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear
 
 ## then specify "127.0.0.1:2321"  as the TPM device path in the examples
@@ -169,6 +170,17 @@ go run sign_verify_tpm/password/main.go --handle=0x81008007 --tpm-path="127.0.0.
 	tpm2_evictcontrol -C o -c key.ctx 0x81008008
 
 go run sign_verify_tpm/password/main.go --handle=0x81008007 --tpm-path="127.0.0.1:2321"
+
+## RSA - no scheme
+
+	tpm2_createprimary -C o -G rsa2048:aes128cfb -g sha256 -c primary.ctx -a 'restricted|decrypt|fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda'
+	tpm2_create -G rsa2048 -g sha256 -u key.pub -r key.priv -C primary.ctx
+	tpm2_flushcontext -t && tpm2_flushcontext -s && tpm2_flushcontext -l
+	tpm2_load -C primary.ctx -u key.pub -r key.priv -c key.ctx
+	tpm2_evictcontrol -C o -c key.ctx 0x81008011
+
+go run sign_verify_tpm/rsassa/main.go --tpm-path="127.0.0.1:2321" --handle 0x81008011
+go run sign_verify_tpm/rsapss/main.go --tpm-path="127.0.0.1:2321" --handle 0x81008011
 
 ```
 

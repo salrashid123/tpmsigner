@@ -85,8 +85,11 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-
-	s, err := r.Sign(rand.Reader, digest, crypto.SHA256)
+	opts := &rsa.PSSOptions{
+		Hash:       crypto.SHA256,
+		SaltLength: rsa.PSSSaltLengthAuto,
+	}
+	s, err := r.Sign(rand.Reader, digest, opts)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
@@ -99,10 +102,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	opts := &rsa.PSSOptions{
-		Hash:       crypto.SHA256,
-		SaltLength: rsa.PSSSaltLengthAuto,
-	}
 	err = rsa.VerifyPSS(rsaPubKey, crypto.SHA256, digest, s, opts)
 	if err != nil {
 		fmt.Println(err)
