@@ -14,7 +14,6 @@ import (
 	"os"
 	"slices"
 
-	"github.com/google/go-tpm-tools/simulator"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
 	saltpm "github.com/salrashid123/tpmsigner"
@@ -25,6 +24,8 @@ const ()
 /*
 
 ## RSA - no password
+# export TPM2TOOLS_TCTI="swtpm:port=2321"
+# export TPM2TOOLS_TCTI="device:/dev/tpmrm0"
 	tpm2_createprimary -C o -G rsa2048:aes128cfb -g sha256 -c primary.ctx -a 'restricted|decrypt|fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda'
 	tpm2_create -G rsa2048:rsassa:null -g sha256 -u key.pub -r key.priv -C primary.ctx
 	tpm2_flushcontext  -t
@@ -32,7 +33,6 @@ const ()
 	tpm2_load -C primary.ctx -u key.pub -r key.priv -c key.ctx
 	tpm2_evictcontrol -C o -c key.ctx 0x81008001
 	tpm2_flushcontext  -t
-
 */
 
 var (
@@ -45,8 +45,6 @@ var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
 func OpenTPM(path string) (io.ReadWriteCloser, error) {
 	if slices.Contains(TPMDEVICES, path) {
 		return tpmutil.OpenTPM(path)
-	} else if path == "simulator" {
-		return simulator.GetWithFixedSeedInsecure(1073741825)
 	} else {
 		return net.Dial("tcp", path)
 	}
@@ -104,5 +102,15 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("RSA Signed String verified\n")
+
+	// // https://pkg.go.dev/crypto@master#MessageSigner
+	// fmt.Println("Using SignMessage()")
+
+	// sr, err := r.SignMessage(r, rand.Reader, b, crypto.SHA256)
+	// if err != nil {
+	// 	log.Println(err)
+	// 	os.Exit(1)
+	// }
+	// fmt.Printf("RSA Signed String: %s\n", base64.StdEncoding.EncodeToString(sr))
 
 }

@@ -26,7 +26,8 @@ const ()
 //
 
 type TPM struct {
-	crypto.Signer
+	_ crypto.Signer
+	_ crypto.MessageSigner // https://tip.golang.org/doc/go1.25#cryptopkgcrypto
 
 	ECCRawOutput bool // for ECC keys, output raw signatures. If false, signature is ans1 formatted
 	refreshMutex sync.Mutex
@@ -152,6 +153,7 @@ func (t TPM) Sign(rr io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, 
 			return nil, fmt.Errorf("signer: unknown hash function %v", opts.HashFunc())
 		}
 	}
+
 	var se tpm2.Session
 	if t.AuthSession != nil {
 		var err error
@@ -263,6 +265,249 @@ func (t TPM) Sign(rr io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, 
 		rsig, err := rspSign.Signature.Signature.ECDSA()
 		if err != nil {
 			return nil, fmt.Errorf("tpmjwt: error getting ecc signature: %v", err)
+		}
+		if t.ECCRawOutput {
+			tsig = append(rsig.SignatureR.Buffer, rsig.SignatureS.Buffer...)
+		} else {
+			r := big.NewInt(0).SetBytes(rsig.SignatureR.Buffer)
+			s := big.NewInt(0).SetBytes(rsig.SignatureS.Buffer)
+			sigStruct := struct{ R, S *big.Int }{r, s}
+			return asn1.Marshal(sigStruct)
+		}
+	}
+	return tsig, nil
+}
+
+func (t TPM) SignMessage(signer crypto.Signer, rand io.Reader, msg []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+	t.refreshMutex.Lock()
+	defer t.refreshMutex.Unlock()
+
+	rwr := transport.FromReadWriter(t.TpmDevice)
+
+	var sess []tpm2.Session
+
+	if t.EncryptionHandle != 0 {
+		encryptionPub, err := tpm2.ReadPublic{
+			ObjectHandle: t.EncryptionHandle,
+		}.Execute(rwr)
+		if err != nil {
+			return nil, err
+		}
+		ePubName, err := encryptionPub.OutPublic.Contents()
+		if err != nil {
+			return nil, err
+		}
+		sess = append(sess, tpm2.HMAC(tpm2.TPMAlgSHA256, 16, tpm2.AESEncryption(128, tpm2.EncryptIn), tpm2.Salted(t.EncryptionHandle, *ePubName)))
+	} else {
+		sess = append(sess, tpm2.HMAC(tpm2.TPMAlgSHA256, 16, tpm2.AESEncryption(128, tpm2.EncryptIn)))
+	}
+
+	var tpmHalg tpm2.TPMIAlgHash
+
+	if opts == nil {
+		tpmHalg = tpm2.TPMAlgSHA256
+	} else {
+		if opts.HashFunc() == crypto.SHA256 {
+			tpmHalg = tpm2.TPMAlgSHA256
+		} else if opts.HashFunc() == crypto.SHA384 {
+			tpmHalg = tpm2.TPMAlgSHA384
+		} else if opts.HashFunc() == crypto.SHA512 {
+			tpmHalg = tpm2.TPMAlgSHA512
+		} else {
+			return nil, fmt.Errorf("signer: unknown hash function %v", opts.HashFunc())
+		}
+	}
+
+	maxDigestBuffer := 1024
+	var hsh []byte
+	var val []byte
+
+	if len(msg) > maxDigestBuffer {
+		pss := make([]byte, 32)
+		_, err := rand.Read(pss)
+		if err != nil {
+			return nil, fmt.Errorf("tpmjwt: failed to generate random for hash %v", err)
+		}
+
+		rspHSS, err := tpm2.HashSequenceStart{
+			Auth: tpm2.TPM2BAuth{
+				Buffer: pss,
+			},
+			HashAlg: tpmHalg,
+		}.Execute(rwr)
+		if err != nil {
+			return nil, fmt.Errorf("tpmjwt: failed to generate hash from TPM HashSequenceStart %v", err)
+		}
+
+		authHandle := tpm2.AuthHandle{
+			Handle: rspHSS.SequenceHandle,
+			Name: tpm2.TPM2BName{
+				Buffer: pss,
+			},
+			Auth: tpm2.PasswordAuth(pss),
+		}
+
+		for len(msg) > maxDigestBuffer {
+			_, err := tpm2.SequenceUpdate{
+				SequenceHandle: authHandle,
+				Buffer: tpm2.TPM2BMaxBuffer{
+					Buffer: msg[:maxDigestBuffer],
+				},
+			}.Execute(rwr, sess...)
+			if err != nil {
+				return nil, fmt.Errorf("tpmjwt: failed to generate hash SequenceUpdate  %v", err)
+			}
+
+			msg = msg[maxDigestBuffer:]
+		}
+
+		rspSC, err := tpm2.SequenceComplete{
+			SequenceHandle: authHandle,
+			Buffer: tpm2.TPM2BMaxBuffer{
+				Buffer: msg,
+			},
+			Hierarchy: tpm2.TPMRHEndorsement,
+		}.Execute(rwr, sess...)
+		if err != nil {
+			return nil, fmt.Errorf("tpmjwt: failed to generate hash from TPM SequenceComplete %v", err)
+		}
+
+		hsh = rspSC.Result.Buffer
+		val = rspSC.Validation.Digest.Buffer
+	} else {
+		h, err := tpm2.Hash{
+			Hierarchy: tpm2.TPMRHEndorsement,
+			HashAlg:   tpmHalg,
+			Data: tpm2.TPM2BMaxBuffer{
+				Buffer: msg,
+			},
+		}.Execute(rwr, sess...)
+		if err != nil {
+			return nil, fmt.Errorf("tpmjwt: failed to generate hash from TPM %v", err)
+		}
+
+		hsh = h.OutHash.Buffer
+		val = h.Validation.Digest.Buffer
+	}
+	var se tpm2.Session
+	if t.AuthSession != nil {
+		var err error
+		var closer func() error
+		se, closer, err = t.AuthSession.GetSession()
+		if err != nil {
+			return nil, fmt.Errorf("signer: error getting session %s", err)
+		}
+		defer closer()
+		if se.IsDecryption() {
+			sess = nil
+		}
+	} else {
+		se = tpm2.PasswordAuth(nil)
+	}
+
+	var tsig []byte
+	switch t.publicKey.(type) {
+	case *rsa.PublicKey:
+		rd, err := t.tpmPublic.Parameters.RSADetail()
+		if err != nil {
+			return nil, fmt.Errorf("signer: can't error getting rsa details %v", err)
+		}
+		sigScheme := rd.Scheme.Scheme
+		_, ok := opts.(*rsa.PSSOptions)
+		if ok {
+			if sigScheme == tpm2.TPMAlgNull {
+				sigScheme = tpm2.TPMAlgRSAPSS
+			}
+			if sigScheme == tpm2.TPMAlgRSASSA {
+				return nil, fmt.Errorf("signer: error TPM Key has TPMAlgRSASSA signature defined while PSSOption was requested")
+			}
+		} else {
+			if sigScheme == tpm2.TPMAlgNull {
+				sigScheme = tpm2.TPMAlgRSASSA // default signature scheme if no signerOpts are specified and the tpm key itself is null
+			}
+		}
+
+		rspSign, err := tpm2.Sign{
+			KeyHandle: tpm2.AuthHandle{
+				Handle: t.Handle,
+				Name:   t.name,
+				Auth:   se,
+			},
+
+			Digest: tpm2.TPM2BDigest{
+				Buffer: hsh[:],
+			},
+			InScheme: tpm2.TPMTSigScheme{
+				Scheme: sigScheme,
+				Details: tpm2.NewTPMUSigScheme(sigScheme, &tpm2.TPMSSchemeHash{
+					HashAlg: tpmHalg,
+				}),
+			},
+			Validation: tpm2.TPMTTKHashCheck{
+				Tag:       tpm2.TPMSTHashCheck,
+				Hierarchy: tpm2.TPMRHEndorsement,
+				Digest: tpm2.TPM2BDigest{
+					Buffer: val,
+				},
+			},
+		}.Execute(rwr, sess...)
+		if err != nil {
+			return nil, fmt.Errorf("signer: can't Sign: %v", err)
+		}
+
+		var rsig *tpm2.TPMSSignatureRSA
+		switch rspSign.Signature.SigAlg {
+		case tpm2.TPMAlgRSASSA:
+			rsig, err = rspSign.Signature.Signature.RSASSA()
+			if err != nil {
+				return nil, fmt.Errorf("signer: error getting rsa ssa signature: %v", err)
+			}
+		case tpm2.TPMAlgRSAPSS:
+			rsig, err = rspSign.Signature.Signature.RSAPSS()
+			if err != nil {
+				return nil, fmt.Errorf("signer: error getting rsa pss signature: %v", err)
+			}
+		default:
+			return nil, fmt.Errorf("signer: unsupported signature algorithm't Sign: %v", err)
+		}
+
+		tsig = rsig.Sig.Buffer
+	case *ecdsa.PublicKey:
+		rd, err := t.tpmPublic.Parameters.ECCDetail()
+		if err != nil {
+			return nil, fmt.Errorf("signer: can't error getting rsa details %v", err)
+		}
+		rspSign, err := tpm2.Sign{
+			KeyHandle: tpm2.AuthHandle{
+				Handle: t.Handle,
+				Name:   t.name,
+				Auth:   se,
+			},
+
+			Digest: tpm2.TPM2BDigest{
+				Buffer: hsh[:],
+			},
+			InScheme: tpm2.TPMTSigScheme{
+				Scheme: rd.Scheme.Scheme,
+				Details: tpm2.NewTPMUSigScheme(rd.Scheme.Scheme, &tpm2.TPMSSchemeHash{
+					HashAlg: tpmHalg,
+				}),
+			},
+			Validation: tpm2.TPMTTKHashCheck{
+				Tag:       tpm2.TPMSTHashCheck,
+				Hierarchy: tpm2.TPMRHEndorsement,
+				Digest: tpm2.TPM2BDigest{
+					Buffer: val,
+				},
+			},
+		}.Execute(rwr, sess...)
+		if err != nil {
+			return nil, fmt.Errorf("signer: can't Sign: %v", err)
+		}
+
+		rsig, err := rspSign.Signature.Signature.ECDSA()
+		if err != nil {
+			return nil, fmt.Errorf("signer: error getting ecc signature: %v", err)
 		}
 		if t.ECCRawOutput {
 			tsig = append(rsig.SignatureR.Buffer, rsig.SignatureS.Buffer...)

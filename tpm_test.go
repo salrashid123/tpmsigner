@@ -3,17 +3,22 @@ package tpmsigner
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"testing"
 
-	"github.com/google/go-tpm-tools/simulator"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	swTPMPathB = "127.0.0.1:2321"
 )
 
 var (
@@ -185,7 +190,7 @@ var (
 )
 
 func TestTPMPublic(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -235,7 +240,7 @@ func TestTPMPublic(t *testing.T) {
 }
 
 func TestTPMSignRSA(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -305,8 +310,80 @@ func TestTPMSignRSA(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestTPMSignMessageRSA(t *testing.T) {
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
+	require.NoError(t, err)
+	defer tpmDevice.Close()
+
+	rwr := transport.FromReadWriter(tpmDevice)
+	primaryKey, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHOwner,
+		InPublic:      tpm2.New2B(tpm2.RSASRKTemplate),
+	}.Execute(rwr)
+	require.NoError(t, err)
+
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: primaryKey.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwr)
+	}()
+
+	rsaKeyResponse, err := tpm2.CreateLoaded{
+		ParentHandle: tpm2.AuthHandle{
+			Handle: primaryKey.ObjectHandle,
+			Name:   primaryKey.Name,
+			Auth:   tpm2.PasswordAuth(nil),
+		},
+		InPublic: tpm2.New2BTemplate(&rsaTemplate),
+	}.Execute(rwr)
+	require.NoError(t, err)
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: rsaKeyResponse.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwr)
+	}()
+
+	pub, err := tpm2.ReadPublic{
+		ObjectHandle: rsaKeyResponse.ObjectHandle,
+	}.Execute(rwr)
+	require.NoError(t, err)
+
+	outPub, err := pub.OutPublic.Contents()
+	require.NoError(t, err)
+
+	rsaDetail, err := outPub.Parameters.RSADetail()
+	require.NoError(t, err)
+
+	rsaUnique, err := outPub.Unique.RSA()
+	require.NoError(t, err)
+
+	pubKey, err := tpm2.RSAPub(rsaDetail, rsaUnique)
+	require.NoError(t, err)
+
+	conf := TPM{
+		TpmDevice: tpmDevice,
+		Handle:    rsaKeyResponse.ObjectHandle,
+	}
+
+	tpm, err := NewTPMCrypto(&conf)
+	require.NoError(t, err)
+
+	msg := "test digest"
+	hash := crypto.SHA256.New()
+	hash.Write([]byte(msg))
+	digest := hash.Sum(nil)
+
+	signature, err := tpm.SignMessage(tpm, rand.Reader, []byte(msg), nil)
+	require.NoError(t, err)
+
+	err = rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, digest, signature)
+	require.NoError(t, err)
+}
+
 func TestTPMSignRSAPersistentHandle(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -389,7 +466,7 @@ func TestTPMSignRSAPersistentHandle(t *testing.T) {
 }
 
 func TestTPMSignRSAFail(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -460,7 +537,7 @@ func TestTPMSignRSAFail(t *testing.T) {
 }
 
 func TestTPMSignRSAFailScehmeMismatch(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -516,7 +593,7 @@ func TestTPMSignRSAFailScehmeMismatch(t *testing.T) {
 }
 
 func TestTPMSignRSASchemeDefaultPSS(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -571,7 +648,7 @@ func TestTPMSignRSASchemeDefaultPSS(t *testing.T) {
 }
 
 func TestTPMSignRSASchemeDefaultRSASSA(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -622,7 +699,7 @@ func TestTPMSignRSASchemeDefaultRSASSA(t *testing.T) {
 }
 
 func TestTPMSignRSAPSS(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -699,7 +776,7 @@ func TestTPMSignRSAPSS(t *testing.T) {
 }
 
 func TestTPMSignECC(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -776,7 +853,7 @@ func TestTPMSignECC(t *testing.T) {
 }
 
 func TestTPMSignECCRAW(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -863,7 +940,7 @@ func TestTPMSignECCRAW(t *testing.T) {
 }
 
 func TestTPMSignPCRPolicy(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -974,7 +1051,7 @@ func TestTPMSignPCRPolicy(t *testing.T) {
 }
 
 func TestTPMSignPolicyFail(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -1112,7 +1189,7 @@ func TestTPMSignPolicyFail(t *testing.T) {
 }
 
 func TestTPMEncryption(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 
@@ -1198,7 +1275,7 @@ func TestTPMEncryption(t *testing.T) {
 }
 
 func TestTPMX509(t *testing.T) {
-	tpmDevice, err := simulator.Get()
+	tpmDevice, err := net.Dial("tcp", swTPMPathB)
 	require.NoError(t, err)
 	defer tpmDevice.Close()
 

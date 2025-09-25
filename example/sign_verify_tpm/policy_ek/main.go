@@ -14,7 +14,6 @@ import (
 	"os"
 	"slices"
 
-	"github.com/google/go-tpm-tools/simulator"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
@@ -65,8 +64,6 @@ var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
 func OpenTPM(path string) (io.ReadWriteCloser, error) {
 	if slices.Contains(TPMDEVICES, path) {
 		return tpmutil.OpenTPM(path)
-	} else if path == "simulator" {
-		return simulator.GetWithFixedSeedInsecure(1073741825)
 	} else {
 		return net.Dial("tcp", path)
 	}

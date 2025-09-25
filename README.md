@@ -74,7 +74,7 @@ cd example/
 
 ## if you want to use a software TPM, 
 # rm -rf /tmp/myvtpm && mkdir /tmp/myvtpm
-# swtpm_setup --tpmstate myvtpm --tpm2 --create-ek-cert
+# swtpm_setup --tpmstate /tmp/myvtpm --tpm2 --create-ek-cert
 # swtpm socket --tpmstate dir=/tmp/myvtpm --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear
 
 ## then specify "127.0.0.1:2321"  as the TPM device path in the examples
