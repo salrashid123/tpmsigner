@@ -27,7 +27,7 @@ const ()
 
 type TPM struct {
 	_ crypto.Signer
-	_ crypto.MessageSigner // https://tip.golang.org/doc/go1.25#cryptopkgcrypto
+	//_ crypto.MessageSigner // introduced in https://tip.golang.org/doc/go1.25#cryptopkgcrypto
 
 	ECCRawOutput bool // for ECC keys, output raw signatures. If false, signature is ans1 formatted
 	refreshMutex sync.Mutex
