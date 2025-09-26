@@ -175,6 +175,15 @@ func (t TPM) Sign(rr io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, 
 		if err != nil {
 			return nil, fmt.Errorf("signer: can't error getting rsa details %v", err)
 		}
+		sigScheme := tpm2.TPMAlgRSASSA
+		if opts != nil {
+			// Signature algorithm specified by SignerOpts -> use that
+			if _, ok := opts.(*rsa.PSSOptions); ok {
+				sigScheme = tpm2.TPMAlgRSAPSS
+			} // else keep tpm2.TPMAlgRSASSA
+		} else if rd.Scheme.Scheme != tpm2.TPMAlgNull {
+			sigScheme = rd.Scheme.Scheme
+		}
 		rspSign, err := tpm2.Sign{
 			KeyHandle: tpm2.AuthHandle{
 				Handle: t.Handle,
@@ -186,8 +195,8 @@ func (t TPM) Sign(rr io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, 
 				Buffer: digest[:],
 			},
 			InScheme: tpm2.TPMTSigScheme{
-				Scheme: rd.Scheme.Scheme,
-				Details: tpm2.NewTPMUSigScheme(rd.Scheme.Scheme, &tpm2.TPMSSchemeHash{
+				Scheme: sigScheme,
+				Details: tpm2.NewTPMUSigScheme(sigScheme, &tpm2.TPMSSchemeHash{
 					HashAlg: algid,
 				}),
 			},
