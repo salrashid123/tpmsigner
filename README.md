@@ -1,8 +1,8 @@
-#### crypto.Signer, implementations for Trusted Platform Modules
+#### crypto.Signer, crypto.MessageSigner implementations for Trusted Platform Modules
 
 where private keys as embedded inside `Trusted Platform Module (TPM)`
 
-Basically, you will get a [crypto.Signer](https://pkg.go.dev/crypto#Signer) interface for the private key. 
+Basically, you will get a [crypto.Signer](https://pkg.go.dev/crypto#Signer) and [crypto.MessageSigner](https://pkg.go.dev/crypto#MessageSigner) interface for the private key. 
 
 Use the signer to create a TLS session, sign CA/CSRs, or just sign anything.
 
@@ -23,7 +23,7 @@ Initialize a signer and directly use `.sign()` as shown in this below and in the
 
 ```golang
 require (
-	github.com/salrashid123/tpmsigner v0.9.6
+	github.com/salrashid123/tpmsigner v0.9.82
 )
 ```
 
@@ -37,10 +37,10 @@ import (
 
 	rwc, err := tpmutil.OpenTPM(path)
 
-	stringToSign := []byte("foo")
+	rawBytes := []byte("foo")
 
 	h := sha256.New()
-	h.Write(b)
+	h.Write(rawBytes)
 	digest := h.Sum(nil)
 
 	// assume the handle to the rsassa key is persistentHandle 0x81008001
@@ -56,6 +56,36 @@ import (
 
 * [https://pkg.go.dev/github.com/salrashid123/tpmsigner](https://pkg.go.dev/github.com/salrashid123/tpmsigner)
 
+
+### Usage MessageSigner
+
+The [crypto.MessageSigner](https://pkg.go.dev/crypto#MessageSigner) interface was introduced in `go 1.25.1` and allows the implementation to perform the hash and then the signature.  (see [messagesigner](https://github.com/salrashid123/messagesigner))
+
+The specific reason its applicable to a TPM comes when the underlying key has the `restricted` attribute set.  If that flag is set on a key, you can't directly sign data and need to ask the TPM to hash the data first, then obtain a validation ticket and then finally sign.  
+
+Note that `rawBytes` isn't hashed first
+
+```golang
+import (
+	"github.com/salrashid123/tpmsigner"
+	"github.com/google/go-tpm/tpmutil"
+)
+
+	rwc, err := tpmutil.OpenTPM(path)
+
+	rawBytes := []byte("foo")
+
+	r, err := tpmsigner.NewTPMCrypto(&tpmsigner.TPM{
+		TpmDevice: rwc,
+		Handle:    tpm2.TPMHandle(handle),
+	})
+
+	s, err := r.SignMessage(rand.Reader, rawBytes, crypto.SHA256)
+
+	fmt.Printf("RSA Signed String: %s\n", base64.StdEncoding.EncodeToString(s))
+```
+
+See the `TestTPMSignMessageRSARestricted` test case in `tpm_test.go`
 
 ---
 
@@ -75,7 +105,7 @@ cd example/
 ## if you want to use a software TPM, 
 # rm -rf /tmp/myvtpm && mkdir /tmp/myvtpm
 # swtpm_setup --tpmstate /tmp/myvtpm --tpm2 --create-ek-cert
-# swtpm socket --tpmstate dir=/tmp/myvtpm --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear
+# swtpm socket --tpmstate dir=/tmp/myvtpm --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear --log level=2
 
 ## then specify "127.0.0.1:2321"  as the TPM device path in the examples
 ## and for tpm2_tools, export the following var
