@@ -278,7 +278,7 @@ func (t TPM) Sign(rr io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, 
 	return tsig, nil
 }
 
-func (t TPM) SignMessage(signer crypto.Signer, rand io.Reader, msg []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+func (t TPM) SignMessage(rand io.Reader, msg []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	t.refreshMutex.Lock()
 	defer t.refreshMutex.Unlock()
 

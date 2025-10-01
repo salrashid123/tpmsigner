@@ -375,7 +375,7 @@ func TestTPMSignMessageRSA(t *testing.T) {
 	hash.Write([]byte(msg))
 	digest := hash.Sum(nil)
 
-	signature, err := tpm.SignMessage(tpm, rand.Reader, []byte(msg), nil)
+	signature, err := tpm.SignMessage(rand.Reader, []byte(msg), nil)
 	require.NoError(t, err)
 
 	err = rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, digest, signature)
