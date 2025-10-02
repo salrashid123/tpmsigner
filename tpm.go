@@ -180,15 +180,18 @@ func (t TPM) Sign(rr io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, 
 		sigScheme := rd.Scheme.Scheme
 		_, ok := opts.(*rsa.PSSOptions)
 		if ok {
-			if sigScheme == tpm2.TPMAlgNull {
+			switch sigScheme {
+			case tpm2.TPMAlgNull:
 				sigScheme = tpm2.TPMAlgRSAPSS
-			}
-			if sigScheme == tpm2.TPMAlgRSASSA {
+			case tpm2.TPMAlgRSASSA:
 				return nil, fmt.Errorf("signer: error TPM Key has TPMAlgRSASSA signature defined while PSSOption was requested")
 			}
 		} else {
-			if sigScheme == tpm2.TPMAlgNull {
+			switch sigScheme {
+			case tpm2.TPMAlgNull:
 				sigScheme = tpm2.TPMAlgRSASSA // default signature scheme if no signerOpts are specified and the tpm key itself is null
+			case tpm2.TPMAlgRSAPSS:
+				return nil, fmt.Errorf("signer: error TPM Key has TPMAlgRSAPSS signature defined while no PSSOption was requested")
 			}
 		}
 
