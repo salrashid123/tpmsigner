@@ -212,6 +212,20 @@ go run sign_verify_tpm/password/main.go --handle=0x81008007 --tpm-path="127.0.0.
 go run sign_verify_tpm/rsassa/main.go --tpm-path="127.0.0.1:2321" --handle 0x81008011
 go run sign_verify_tpm/rsapss/main.go --tpm-path="127.0.0.1:2321" --handle 0x81008011
 
+
+## for restricted key (signmessage)
+
+	tpm2_createek -c ek.ctx -G rsa -u ek.pub
+	tpm2_createak -C ek.ctx -c ak.ctx -u ak.pub
+	tpm2_evictcontrol -C o -c ak.ctx 0x81008012
+	tpm2_flushcontext -t && tpm2_flushcontext -s && tpm2_flushcontext -l
+
+	# tpm2_createprimary -C o  -G rsa2048:aes128cfb -g sha256  -c primary.ctx -a 'restricted|decrypt|fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda'
+	# tpm2_create -G rsa2048:rsassa:null -g sha256 -u key.pub -r key.priv -C primary.ctx \ 
+	#        -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|sign"
+	# tpm2_load -C primary.ctx -u key.pub -r key.priv -c key.ctx	
+	# tpm2_evictcontrol -C o -c key.ctx 0x81008012
+go run sign_verify_tpm/signmessage/main.go --handle=0x81008012 --tpm-path="127.0.0.1:2321"
 ```
 
 
